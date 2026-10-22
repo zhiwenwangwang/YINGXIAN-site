@@ -32,7 +32,7 @@ const rawModel = (async () => {
   });
   return records;
 })();
-// Original carousel order: LinkedIn, X, M. M shows the crown; X the middle.
+// The final particle carousel retains its original whole, middle and crown order.
 const volumeData = Promise.all(['tower','middle','crown'].map(async name => {
   const response=await fetch(new URL(`./assets/${name}-volume.bin`,import.meta.url));
   if (!response.ok) throw new Error(`${name} volume failed to load`);
@@ -255,18 +255,26 @@ window.__installTower = async R => {
     home.visible=reveal>.001;
   });
 
-  const selections=[n=>n.startsWith('level5')||n.startsWith('spire'),n=>n.startsWith('level3')];
+  const selections=[
+    {levels:['level5','spire']},
+    {levels:['level4','level3']},
+    {levels:['level2','level1','base','annex']},
+  ];
+  if(objects.cubes.length!==selections.length)throw new Error('Expected three tower structure views');
   objects.cubes.forEach((cube,i)=>{
-    const geometry=runtimeGeometry(R,merged(records,selections[i]||selections[1],2.9));
+    const selection=selections[i];
+    const includesLevel=name=>selection.levels.some(level=>name.startsWith(level));
+    const geometry=runtimeGeometry(R,merged(records,includesLevel,2.9));
     geometry.boundsTree=new R.BVH(geometry);
     cube.mesh.geometry=geometry;
-    cube.mesh.name=i===0?'tower-crown':'tower-middle';
+    cube.mesh.name=['tower-crown','tower-upper','tower-lower'][i];
+    cube.mesh.userData.towerLevels=selection.levels;
     cube.mesh.material.uniforms.uThickness.value=.35;
     cube.mesh.material.uniforms.uTransmission.value=.68;
     cube.mesh.material.normalScale.set(.55,.55);
     cube.mesh3.material.visible=false;
     const detail=R.controller.detailScene.objects[i];
-    detail.mesh.geometry=runtimeGeometry(R,merged(records,selections[i]||selections[1],1.2));
+    detail.mesh.geometry=runtimeGeometry(R,merged(records,includesLevel,1.2));
     detail.mesh.material=subjectMaterial(R,{dark:'#102034',light:'#7a91ab'});
     detail.mesh.name=cube.mesh.name+'-detail';
   });
@@ -296,10 +304,11 @@ window.__installTower = async R => {
   particles.mesh.computationMaterial.uniforms.uVolumeScale.value=1;
 
   window.MUTA = {
-    ready:true, reference:R, homeState:homeInteraction.state, subjects:{home,parts,crown:objects.cubes[0],middle:objects.cubes[1],passage},
+    ready:true, reference:R, homeState:homeInteraction.state,
+    subjects:{home,parts,crown:objects.cubes[0],upper:objects.cubes[1],lower:objects.cubes[2],middle:objects.cubes[1],passage},
     get progress(){return R.controller.scroll.y;},
     go(value){R.controller.stopAutoCenter();R.controller.centerScroll(value,.8);},
-    chapters:{home:.66,crown:2.35,middle:3.35,interior:5.2,final:8.29},
+    chapters:{home:.66,crown:2.35,upper:3.35,lower:4.35,interior:6.2,final:9.29},
   };
   document.dispatchEvent(new CustomEvent('tower-ready'));
 };

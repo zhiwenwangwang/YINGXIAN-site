@@ -3,6 +3,15 @@
 export const heritageSource = 'https://whc.unesco.org/en/tentativelists/5803/';
 
 export function configureTowerContent(config) {
+  const middleTemplate=config.cubes[1];
+  config.cubes.push({
+    ...middleTemplate,
+    interior:{
+      ...middleTemplate.interior,
+      social:middleTemplate.interior.social.map(item=>({...item})),
+      links:middleTemplate.interior.links.map(item=>({...item})),
+    },
+  });
   config.manifesto = {
     title: '////// Yingxian',
     text: 'Built in 1056. An octagonal timber pagoda in Shanxi, China. Explore its crown, layered structure and inner frame.',
@@ -20,8 +29,12 @@ export function configureTowerContent(config) {
       content: 'The crown brings the fifth visible storey, its sweeping roof and the finial into one composition. Eight sides converge toward the summit, completing the silhouette of the Yingxian Wooden Pagoda.\n\nBuilt in 1056 during the Liao dynasty, the pagoda rises 67.31 metres. This view isolates the upper structure from the supplied architectural model, revealing the relationship between roof, columns and supporting timber members.',
     },
     {
-      title: 'STRUCTURE_02 Middle Storey', hash: 'middle-storey',
-      content: 'The middle storey reveals the repeated octagonal order of the pagoda. Columns, beams and bracket assemblies form a layered timber framework beneath the projecting roof.\n\nThe building has five visible storeys and four concealed structural levels. This third-storey model brings the outer gallery, roof and internal supports into view, inviting a closer look at how individual members form a coherent architectural whole.',
+      title: 'STRUCTURE_02 Upper Tower Body', hash: 'upper-tower-body',
+      content: 'The upper half brings together the fourth and third storeys. Repeating octagonal galleries step inward as they rise, while brackets transfer the broad roof loads into a dense timber frame.\n\nExplore the upper body as one connected assembly: paired galleries, columns and layered dougong reveal how the pagoda carries its weight without nails as its principal structural system.',
+    },
+    {
+      title: 'STRUCTURE_03 Lower Tower Body', hash: 'lower-tower-body',
+      content: 'The lower half joins the first and second storeys to the broad ground-level base. Its larger galleries and closely spaced columns support the stacked levels above while opening the building to the surrounding landscape.\n\nThe lower frame anchors the whole pagoda. Follow the transition from the base platform through the first two timber storeys to see how its load-bearing rhythm grows upward.',
     },
   ];
   config.cubes.forEach((cube,i) => {
