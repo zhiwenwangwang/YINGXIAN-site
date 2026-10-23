@@ -15,6 +15,8 @@ export function installModelHover(home,floors,camera,interaction) {
     return {key,floor,box:box.expandByScalar(.012)};
   });
   const envelope=new THREE.Box3();boxes.forEach(({box})=>envelope.union(box));
+  const storeyGap=.09; // The assembled model is normalized to a height of 1.
+  const maximumLift=(boxes.length-1)*storeyGap;
   const state=interaction.state;
   state.modelHover=false;state.modelSplit=0;state.hoveredFloor=null;
   let lastFloor=null;
@@ -29,7 +31,7 @@ export function installModelHover(home,floors,camera,interaction) {
       raycaster.setFromCamera(ndc,camera);
       ray.copy(raycaster.ray).applyMatrix4(inverse);
       // Retain the expanded silhouette while open, including the gaps.
-      const bounds=envelope.clone();bounds.max.y+=state.modelSplit*.17;
+      const bounds=envelope.clone();bounds.max.y+=state.modelSplit*maximumLift;
       hovered=!!ray.intersectBox(bounds,hit);
       if(hovered){
         let closest=Infinity;
@@ -51,7 +53,7 @@ export function installModelHover(home,floors,camera,interaction) {
     if(Math.abs(state.modelSplit-target)<.001)state.modelSplit=target;
     // Cumulative vertical gaps separate complete storeys without intersecting
     // their own roofs, walls or beams. The plinth stays anchored in the snow.
-    boxes.forEach(({floor},index)=>{floor.hoverLift=index*.033*state.modelSplit;});
+    boxes.forEach(({floor},index)=>{floor.hoverLift=index*storeyGap*state.modelSplit;});
   }
   return {update};
 }
