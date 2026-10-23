@@ -18,7 +18,7 @@ export function installModelHover(home,floors,camera,interaction) {
   const storeyGap=.09; // The assembled model is normalized to a height of 1.
   const maximumLift=(boxes.length-1)*storeyGap;
   const state=interaction.state;
-  state.modelHover=false;state.modelSplit=0;state.hoveredFloor=null;
+  state.modelHover=false;state.modelSplit=0;state.componentSplit=0;state.hoveredFloor=null;
   let lastFloor=null;
 
   function update(enabled,damping){
@@ -32,11 +32,15 @@ export function installModelHover(home,floors,camera,interaction) {
       ray.copy(raycaster.ray).applyMatrix4(inverse);
       // Retain the expanded silhouette while open, including the gaps.
       const bounds=envelope.clone();bounds.max.y+=state.modelSplit*maximumLift;
+      bounds.min.x-=state.componentSplit*.14;bounds.max.x+=state.componentSplit*.14;
+      bounds.min.z-=state.componentSplit*.14;bounds.max.z+=state.componentSplit*.14;
+      bounds.max.y+=state.componentSplit*.04;
       hovered=!!ray.intersectBox(bounds,hit);
       if(hovered){
         let closest=Infinity;
-        boxes.forEach(({key,box})=>{
-          if(ray.intersectBox(box,hit)){
+        boxes.forEach(({key,floor,box})=>{
+          const expanded=box.clone().translate(new THREE.Vector3(0,floor.hoverLift||0,0)).expandByScalar(state.componentSplit*.12);
+          if(ray.intersectBox(expanded,hit)){
             const distance=hit.distanceToSquared(ray.origin);
             if(distance<closest){closest=distance;hoveredFloor=key;}
           }
@@ -51,6 +55,7 @@ export function installModelHover(home,floors,camera,interaction) {
     // Finish the movement exactly instead of continually nudging dense faces
     // by fractions smaller than a depth-buffer step while the pointer rests.
     if(Math.abs(state.modelSplit-target)<.001)state.modelSplit=target;
+    state.componentSplit=THREE.MathUtils.smoothstep(state.modelSplit,.12,.96);
     // Cumulative vertical gaps separate complete storeys without intersecting
     // their own roofs, walls or beams. The plinth stays anchored in the snow.
     boxes.forEach(({floor},index)=>{floor.hoverLift=index*storeyGap*state.modelSplit;});

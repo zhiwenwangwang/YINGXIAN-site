@@ -5,15 +5,17 @@ import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
 import { configureTowerContent } from './tower-content.js';
 import { installHomeInteraction } from './home-interaction.js';
 import { installModelHover } from './home-model-hover.js';
+import { homeStoreyGeometry } from './home-components.js';
+import { installStructureHud } from './home-structure-hud.js';
 
 window.__configureTower = configureTowerContent;
 
 // The reference renderer owns input, camera paths, compositing, sound and UI.
 // This module changes only the subjects occupying its existing scene slots.
-const rawModel = (async () => {
+async function loadTowerModel(url) {
   const decoder = new DRACOLoader().setDecoderPath('./vendor/draco/');
   const loader = new GLTFLoader().setDRACOLoader(decoder);
-  const gltf = await loader.loadAsync('./assets/yingxian-tower.glb');
+  const gltf = await loader.loadAsync(url);
   decoder.dispose();
   gltf.scene.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(gltf.scene);
@@ -28,10 +30,13 @@ const rawModel = (async () => {
     geometry.translate(-center.x, -box.min.y, -center.z);
     geometry.scale(scale, scale, scale);
     geometry.computeBoundingBox();
-    records.push({ name: node.name, geometry, material: mesh.material.name });
+    records.push({ name: node.name.split('__').slice(0,2).join('__'), geometry, material: mesh.material.name,
+      sourceName:node.userData.sourceName,componentType:node.userData.componentType });
   });
   return records;
-})();
+}
+const rawModel=loadTowerModel('./assets/yingxian-tower.glb');
+const rawHomeModel=loadTowerModel('./assets/yingxian-home-components.glb');
 // The final particle carousel retains its original whole, middle and crown order.
 const volumeData = Promise.all(['tower','middle','crown'].map(async name => {
   const response=await fetch(new URL(`./assets/${name}-volume.bin`,import.meta.url));
@@ -51,13 +56,17 @@ function subjectMaterial(R, options = {}) {
     transparent: false, depthWrite: true, depthTest: true,
     uniforms: {
       uTime: { value: 0 }, uReveal: { value: 1 }, uGlow: { value: .05 }, uAlpha: { value: 1 },
+      ...(options.components?{uComponentSplit:{value:0}}:{}),
       uDark: { value: new R.Color(options.dark || '#8997ad') },
       uLight: { value: new R.Color(options.light || '#edf5ff') },
       tFrost: { value: R.textures.load('cubes/cube3_normal.ktx2', 'linear-repeat') },
       tGrain: { value: R.textures.load('cubes/cube3_roughness.ktx2', 'linear-repeat') },
     },
-    vertexShader: `varying vec3 vPos;varying vec3 vNormal;varying vec3 vWorld;varying vec3 vEye;
-      void main(){vPos=position;vNormal=mat3(modelMatrix)*normal;vec4 w=modelMatrix*vec4(position,1.);vWorld=w.xyz;vEye=cameraPosition-w.xyz;gl_Position=projectionMatrix*viewMatrix*w;}`,
+    vertexShader: `${options.components?'attribute vec3 aExplodeOffset;uniform float uComponentSplit;':''}
+      varying vec3 vPos;varying vec3 vNormal;varying vec3 vWorld;varying vec3 vEye;
+      void main(){vPos=position;vNormal=mat3(modelMatrix)*normal;vec3 displaced=position;
+        ${options.components?'displaced+=aExplodeOffset*uComponentSplit;':''}
+        vec4 w=modelMatrix*vec4(displaced,1.);vWorld=w.xyz;vEye=cameraPosition-w.xyz;gl_Position=projectionMatrix*viewMatrix*w;}`,
     fragmentShader: `varying vec3 vPos,vNormal,vWorld,vEye;uniform float uTime,uReveal,uGlow,uAlpha;uniform vec3 uDark,uLight;uniform sampler2D tFrost,tGrain;${noise}
       vec3 tri(sampler2D tex,vec3 p,vec3 n){vec3 w=pow(abs(n),vec3(4.));w/=max(.001,w.x+w.y+w.z);return texture2D(tex,p.yz).rgb*w.x+texture2D(tex,p.xz).rgb*w.y+texture2D(tex,p.xy).rgb*w.z;}
       vec3 unit(vec3 v){float l=dot(v,v);return l>1e-12?v*inversesqrt(l):vec3(0.,1.,0.);}
@@ -121,34 +130,6 @@ function runtimeGeometry(R, source) {
   return geometry;
 }
 
-// Bake a storey's parts into a single coordinate system and draw call. Applying
-// the same lift to separate part pivots left coplanar timber faces with slightly
-// different GPU depths as they moved. Keep opposite windings for interior walls.
-function homeStoreyGeometry(records, key, pivot) {
-  const geometries=records.filter(record=>record.name.split('__')[0]===key).map(record=>{
-    const geometry=record.geometry.clone();
-    for(const name of Object.keys(geometry.attributes))if(!['position','normal'].includes(name))geometry.deleteAttribute(name);
-    return geometry;
-  });
-  const geometry=mergeGeometries(geometries);
-  geometries.forEach(source=>source.dispose());
-  const position=geometry.attributes.position,index=geometry.index;
-  const vertexKeys=new Array(position.count);
-  for(let i=0;i<position.count;i++)vertexKeys[i]=[position.getX(i),position.getY(i),position.getZ(i)].map(value=>Math.round(value*1e7)).join(',');
-  const seen=new Set(),indices=[];
-  for(let i=0;i<index.count;i+=3){
-    const a=index.getX(i),b=index.getX(i+1),c=index.getX(i+2);
-    const corners=[vertexKeys[a],vertexKeys[b],vertexKeys[c]];
-    const start=corners[0]<=corners[1]&&corners[0]<=corners[2]?0:corners[1]<=corners[2]?1:2;
-    const key=[corners[start],corners[(start+1)%3],corners[(start+2)%3]].join('|');
-    if(seen.has(key))continue;
-    seen.add(key);indices.push(a,b,c);
-  }
-  geometry.setIndex(indices);
-  geometry.translate(-pivot.x,-pivot.y,-pivot.z);
-  return geometry;
-}
-
 // Recover connected timber components, including vertices split at UV/normal
 // seams, so the reference portal shader can move entire beams coherently.
 function portalAttributes(geometry) {
@@ -185,6 +166,7 @@ function portalAttributes(geometry) {
 
 window.__installTower = async R => {
   const records = await rawModel;
+  const homeRecords=await rawHomeModel;
   // A local text texture replaces the old brand while retaining its reveal,
   // hover animation, position and responsive sizing.
   const wordmark=document.createElement('canvas');wordmark.width=1024;wordmark.height=216;
@@ -198,19 +180,19 @@ window.__installTower = async R => {
   const [exterior, objects, passage] = R.controller.scrollComposers.map(c => c.passes[0].scene);
   const home = new R.Group();home.name='yingxian-tower';home.scale.setScalar(4.7);home.position.y=-.52;
   const parts = new Map();
-  const mat = subjectMaterial(R);
-  for (const r of records) {
+  const mat = subjectMaterial(R,{components:true});
+  for (const r of homeRecords) {
     if (!parts.has(r.name)) {
       const group=new R.Group();group.name=r.name;
-      const box=new THREE.Box3();records.filter(o=>o.name===r.name).forEach(o=>box.union(o.geometry.boundingBox));
+      const box=new THREE.Box3();homeRecords.filter(o=>o.name===r.name).forEach(o=>box.union(o.geometry.boundingBox));
       group.userData.center=box.getCenter(new THREE.Vector3());
       group.position.copy(group.userData.center);
       parts.set(r.name,group);home.add(group);
     }
   }
   exterior.add(home);
-  // Move each storey as one rigid assembly; independently moving roofs and
-  // walls made coincident faces intersect and shimmer under the pointer.
+  // Keep one stable draw mesh per storey. Its individual timber islands move
+  // rigidly in the vertex shader, using offsets baked once during loading.
   const floors=new Map();
   for(const part of parts.values()){
     const key=part.name.split('__')[0];
@@ -219,7 +201,8 @@ window.__installTower = async R => {
   }
   for(const [key,floor] of floors){
     floor.center.divideScalar(floor.parts.length);
-    const anchor=floor.parts[0],geometry=homeStoreyGeometry(records,key,anchor.userData.center);
+    const anchor=floor.parts[0],{geometry,components,box}=homeStoreyGeometry(homeRecords,key,anchor.userData.center);
+    floor.components=components;floor.box=box;
     const mesh=new R.Mesh(runtimeGeometry(R,geometry),mat);
     mesh.name='tower-storey-'+key;mesh.frustumCulled=false;
     anchor.add(mesh);geometry.dispose();
@@ -231,6 +214,7 @@ window.__installTower = async R => {
   exterior.igloobase.mesh.material.uniforms.tMap.value = R.textures.load('igloo/ground_sansigloo_color.ktx2', 'srgb');
   const homeInteraction=installHomeInteraction(R,exterior);
   const modelHover=installModelHover(home,floors,exterior.camera,homeInteraction);
+  const structureHud=installStructureHud(home,floors,exterior.camera,homeInteraction.state);
   // The cursor HUD stays independent of the rigid-storey hover animation.
   exterior.beforeRenderCbs.push(()=>{
     exterior.igloo.mesh.visible=false;exterior.igloocage.mesh.visible=false;exterior.igloooutline.mesh.visible=false;
@@ -238,6 +222,7 @@ window.__installTower = async R => {
     mat.uniforms.uReveal.value=reveal;mat.uniforms.uTime.value=R.time.time;
     const damping=1-Math.exp(-Math.min(R.time.delta,50)/350);
     modelHover.update(homeInteraction.state.introComplete&&exterior.isSceneVisible&&!R.controller.isDetailOpen,damping);
+    mat.uniforms.uComponentSplit.value=homeInteraction.state.componentSplit;
     for(const [key,floor] of floors){
       const center=floor.center;
       const entry=(1-reveal)*.45;
@@ -254,6 +239,7 @@ window.__installTower = async R => {
     mat.uniforms.uGlow.value=THREE.MathUtils.lerp(mat.uniforms.uGlow.value,glow,damping);
     home.visible=reveal>.001;
   });
+  R.events.on('webgl_render',()=>structureHud.update(homeInteraction.state.introComplete&&exterior.isSceneVisible&&!R.controller.isDetailOpen));
 
   const selections=[
     {levels:['level5','spire']},
@@ -305,7 +291,7 @@ window.__installTower = async R => {
 
   window.MUTA = {
     ready:true, reference:R, homeState:homeInteraction.state,
-    subjects:{home,parts,crown:objects.cubes[0],upper:objects.cubes[1],lower:objects.cubes[2],middle:objects.cubes[1],passage},
+    subjects:{home,parts,floors,crown:objects.cubes[0],upper:objects.cubes[1],lower:objects.cubes[2],middle:objects.cubes[1],passage},
     get progress(){return R.controller.scroll.y;},
     go(value){R.controller.stopAutoCenter();R.controller.centerScroll(value,.8);},
     chapters:{home:.66,crown:2.35,upper:3.35,lower:4.35,interior:6.2,final:9.29},
